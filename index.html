@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+
+<body>
+<script src="./index.js"></script>
+<script type="text/javascript">
+  // 可访问全局作用域的白名单列表
+  const access_white_list = ['Math', 'Date', 'console'];
+  // 执行上下文对象
+  const ctx = {
+    func: variable => {
+      console.log(variable);
+    },
+    foo: '1111foo',
+  };
+  // 待执行程序
+  const code = `
+    Math.random();
+    // location.href = 'xxx';
+    console.log(location.href,this)
+    func(foo);
+`;
+
+
+  const newSandBox = new MultipleProxySandbox('代理沙箱');
+  newSandBox.active();
+  const proxyWindow = newSandBox.proxy;
+  newSandBox.assign(ctx);
+  console.log(newSandBox, proxyWindow, proxyWindow.func, 11, proxyWindow.location);
+
+  // 构造一个 with 来包裹需要执行的代码，返回 with 代码块的一个函数实例
+  function withedYourCode(code) {
+    code = 'with(exposeObj) {' + code + '}';
+    return new Function('exposeObj', code);
+  }
+
+  function littlePoorSandbox(code, ctx) {
+    withedYourCode(code).call(ctx, ctx); // 将 this 指向手动构造的全局代理对象
+  }
+
+  littlePoorSandbox(code, proxyWindow);
+
+  // 执行上下文对象的代理对象
+  const ctxProxy = new Proxy(ctx, {
+    has: (target, prop) => { // has 可以拦截 with 代码块中任意属性的访问
+      if (access_white_list.includes(prop)) { // 在可访问的白名单内，可继续向上查找
+        return target.hasOwnProperty(prop);
+      }
+
+      if (!target.hasOwnProperty(prop)) {
+        target[prop] = {};
+        // throw new Error(`Invalid expression - ${prop}! You can not do that!`);
+      }
+
+      return true;
+    },
+  });
+  littlePoorSandbox(code, ctxProxy);
+
+
+  // 沙箱全局代理对象类
+  class SandboxGlobalProxy {
+
+    constructor(sharedState) {
+      // 创建一个 iframe 对象，取出其中的原生浏览器全局对象作为沙箱的全局对象
+      const iframe = document.createElement('iframe', {url: 'about:blank'})
+      document.body.appendChild(iframe)
+      const sandboxGlobal = iframe.contentWindow // 沙箱运行时的全局对象
+      return new Proxy(sandboxGlobal, {
+        has: (target, prop) => { // has 可以拦截 with 代码块中任意属性的访问
+          if (sharedState.includes(prop)) { // 如果属性存在于共享的全局状态中，则让其沿着原型链在外层查找
+            return false;
+          }
+
+          if (!target.hasOwnProperty(prop)) {
+            throw new Error(`Invalid expression - ${prop}! You can not do that!`);
+          }
+          return true;
+        },
+      });
+
+    }
+
+  }
+
+</script>
+</body>
+
+</html>
